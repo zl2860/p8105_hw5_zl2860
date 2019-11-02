@@ -11,7 +11,10 @@ library(tidyverse)
 library(ggsci)
 ```
 
+
+# Load data
 ```{r}
+# Load data
 set.seed(10)
 
 iris_with_missing = iris %>% 
@@ -23,7 +26,8 @@ iris_with_missing = iris %>%
 # Problem 1
 
 ```{r}
-fill_in<-
+# create a filled-in dataset
+fill_in <-
   function(vec){
     if(is.numeric(vec)){
       mean_vec = mean(vec, na.rm= TRUE) # mean is apprxiumated
@@ -37,25 +41,29 @@ fill_in<-
 data_filled <-
   map_df(iris_with_missing, fill_in)
 
+# check if missing values are replaced
+skimr::skim(data_filled)
 ```
+
+Missing values are replaced.
 
 # Problem 2 
 
 ## Tidy the data
 
 ```{r, message=FALSE, warning=FALSE}
-file_names = list.files("./data/")
+file_names = list.files("./data/") # create a list of filenames
 
 study_data <-
   tibble( file_names = file_names) %>%
   bind_cols(map_df(str_c("./data/", file_names), read_csv)) %>%
-  separate(file_names, into = c("arm", "id"))
+  separate(file_names, into = c("arm", "id")) # tidy data
 
 data_con <- 
   study_data %>%
   filter(arm == "con")
 
-data_con %>%
+data_con %>% #only include control arm
   knitr::kable()
 ```
 
@@ -72,7 +80,7 @@ study_data %>%
   geom_line() +
   ggsci::scale_color_jco() +
   theme_bw() +
-  labs( title = "A Spaghetti Plot showing observations on each subject over time",
+  labs( title = "A Spaghetti Plot Showing Observations on Each Subject Over Time",
         x = "Week",
         y = "Observations") +
   theme(plot.title = element_text(hjust = .5))
@@ -82,4 +90,102 @@ study_data %>%
 From the plot above, we see that the average observation on the subjects in experimental arm is higher than that on the subjects in control arm. Also, over the 8 weeks, the observations on the subjects in experimental arm have an increasing trend while the observations in control arm fluctuate within a range.
 
 
+# Problem 3
 
+## Set the following design elements
+
+```{r}
+set.seed(886) # ensure reproducible
+
+# buid function
+slr_func <- 
+  function(beta_1){
+    
+    n = 30
+    beta_0 = 2
+    sigma_squared = 50 #local defalut settings, we only change beta_1
+    
+    sim_data =  
+     tibble(
+       x = rnorm(n),
+       y = beta_0 + beta_1*x + rnorm(n, mean = 0, sd = sqrt(sigma_squared))) # create raw data for regression
+   
+   fit = lm(y ~ x, sim_data) # fit model
+   
+   fit %>%
+     broom::tidy() %>%
+     select(term,estimate, p.value) %>%
+     filter(term == "x") %>%
+     mutate(term = recode(term, "x" = "beta_1_hat")) #tidy the results
+  } 
+
+
+# generate 10000 datasets
+model_10000 <-
+  rerun(10000, slr_func(beta_1 = 0)) %>%
+  bind_rows() 
+
+# Repeat the above for β1={1,2,3,4,5,6}
+repeated_beta_1 <- 
+  tibble(beta_1 = c(1:6)) %>%
+  mutate(output_list = map(.x = beta_1, ~rerun(10000, slr_func(beta_1 = .x ))),
+         output_dfs = map(output_list,bind_rows)) %>%
+  select(-output_list) %>%
+  unnest(output_dfs) %>%
+  pivot_wider( names_from = term,
+               values_from = estimate) %>%
+  janitor::clean_names()
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+repeated_beta_1 %>%
+  group_by(beta_1) %>%
+  summarize(prop_rejected = sum(p_value < 0.05)/n()) %>%
+  ggplot(aes( y = prop_rejected, x = beta_1)) +
+  geom_point() +
+  geom_smooth() +
+  theme_bw() +
+  labs( title = "Association Between Effect Size and Power",
+        x = "Beta_1",
+        y = "Power") +
+  theme(plot.title = element_text(hjust = .5))
+  
+```
+
+From the plot above, we see that as β1 increases, the power correspondingly increases. however, the power's rate of increasing is gradually decreasing as β1 increases.
+
+
+## Make a plot showing the average estimate of β̂ 1 on the y axis and the true value of β1 on the x axis
+
+```{r warning=FALSE, message=FALSE}
+
+all_avg <-
+  repeated_beta_1 %>%
+  group_by(beta_1) %>%
+  summarize(avg_beta_hat = mean(beta_1_hat))
+  
+
+rejected_avg <- 
+  repeated_beta_1 %>%
+  mutate(rejection = ifelse( p_value < 0.05, "yes", "no")) %>%
+  filter( rejection == "yes") %>%
+  group_by(beta_1) %>%
+  summarize(avg_beta_hat = mean(beta_1_hat))
+
+ggplot() + 
+  geom_point(aes(x = beta_1, y = avg_beta_hat), data = all_avg) +
+  geom_smooth(aes(x = beta_1, y = avg_beta_hat), data = all_avg) +
+  geom_point(aes(x = beta_1, y = avg_beta_hat), data = rejected_avg) +
+  geom_smooth(aes(x = beta_1, y = avg_beta_hat, color = "red"), data = rejected_avg) +
+  theme_bw() +
+  labs( title = "Association Between the Average Estimates and True Values",
+        y = "Average Beta1 Hat",
+        x = "Beta1") +
+  theme(plot.title = element_text(hjust = .5)) +
+  ggsci::scale_color_lancet()
+```
+
+The sample average of β̂1 across tests for which the null is rejected is always higher than the true value of β1. However, as the true value increases, the sample average of β̂1 gradually approxiates the true value.
+
+As we see in the first plot, when the true β1 is small, the power is also low. Therefore, given the null hypothesis β1 = 0 is FAlSE, the probability that a sampling result may reject H0 is relatively small. Hence, a greater "observed β̂1" is needed to reject the FALSE null hypothesis. However, as the true value of β increases, the power also increases, which means it becomes easier for an " observed β̂1 " to reject null hypothesis. That's why as the true value increases, the sample average of β̂1  gradually approxiates the true value.
