@@ -8,7 +8,7 @@ output: github_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
-library(ggsci)
+library(patchwork)
 ```
 
 
@@ -28,48 +28,80 @@ iris_with_missing = iris %>%
 ```{r}
 # create a filled-in dataset
 fill_in <-
-  function(vec){
-    if(is.numeric(vec)){
-      mean_vec = mean(vec, na.rm= TRUE) # mean is apprxiumated
-      vec = replace_na(vec,round(mean_vec, digits = 1))
+  function(vec){ # vector as the argument
+    if (is.numeric(vec)) {
+      mean_vec = mean(vec, na.rm = TRUE)
+      vec = replace_na(vec,round(mean_vec, digits = 1))# mean is rounded
     }
-    else if(is.character(vec)){
-      vec = replace_na(vec, "virginica")
+    else if (is.character(vec)) {
+      vec = replace_na(vec, "virginica") #  fill in missing values with "virginica"
+    }
+    else{
+      print("Error: Unexpected data type. This function is only for filling in missing values of numeric and character data. ")
     }
   }
 
 data_filled <-
-  map_df(iris_with_missing, fill_in)
+  map_df(iris_with_missing, fill_in) # apply the function to the data
 
 # check if missing values are replaced
 skimr::skim(data_filled)
 ```
 
-Missing values are replaced.
+As the summary of the data shows, missing values are replaced by the defined rules.
 
 # Problem 2 
 
-## Tidy the data
+## Load and tidy the data
 
 ```{r, message=FALSE, warning=FALSE}
 file_names = list.files("./data/") # create a list of filenames
 
 study_data <-
   tibble( file_names = file_names) %>%
-  bind_cols(map_df(str_c("./data/", file_names), read_csv)) %>%
-  separate(file_names, into = c("arm", "id")) # tidy data
+  bind_cols(map_df(str_c("./data/", file_names), read_csv)) %>% # read and save the result in the created dataframe
+  separate(file_names, into = c("arm", "id")) # tidy the data, including the subject ID, arm, and observations over time
+```
+
+### The complete data after being tidied
+```{r, message=FALSE, warning=FALSE}
+study_data %>% # show the complete data
+  knitr::kable()
+```
+
+### The data including only the control arm and subject ID
+```{r, message=FALSE, warning=FALSE}
 
 data_con <- 
   study_data %>%
   filter(arm == "con")
-
-data_con %>% #only include control arm
+data_con %>% # only include control arm
   knitr::kable()
 ```
 
 ## Make a Spaghetti Plot
 
-```{r}
+```{r, fig.width=10, fig.height=8}
+plot_abv <-
+study_data %>%
+  pivot_longer( week_1 : week_8,
+                names_to = "week",
+                names_prefix = "week_",
+               values_to = "observations") %>%
+  mutate(arm_id = str_c(arm,id)) %>%
+  ggplot(aes( x = week, y = observations, color = id, group = arm_id)) +
+  geom_line() +
+  geom_point(aes(shape = arm)) +
+  ggsci::scale_color_jco() +
+  facet_grid(. ~ arm) +
+  theme_bw() +
+  labs( title = "The Spaghetti Plot Showing Observations on Each Subject Over Time",
+        x = "Week",
+        y = "Observations") +
+  theme(plot.title = element_text(hjust = .5),
+        legend.position = "bottom") 
+
+plot_btm <-
 study_data %>%
   pivot_longer( week_1 : week_8,
                 names_to = "week",
@@ -78,16 +110,15 @@ study_data %>%
   mutate(arm_id = str_c(arm,id)) %>%
   ggplot(aes( x = week, y = observations, color = arm, group = arm_id)) +
   geom_line() +
+  geom_point(aes(shape = arm), size = 2) +
   ggsci::scale_color_jco() +
-  theme_bw() +
-  labs( title = "A Spaghetti Plot Showing Observations on Each Subject Over Time",
-        x = "Week",
-        y = "Observations") +
-  theme(plot.title = element_text(hjust = .5))
+  theme_bw()
+
+plot_abv/plot_btm
 ```
 
 
-From the plot above, we see that the average observation on the subjects in experimental arm is higher than that on the subjects in control arm. Also, over the 8 weeks, the observations on the subjects in experimental arm have an increasing trend while the observations in control arm fluctuate within a range.
+From the plot above, we see that over the 8 weeks the average observation on the subjects in experimental arm is higher than that on the subjects in control arm. Also, over the 8 weeks, the observed values on the subjects in experimental arm have an significant increasing trend while the observed values in control arm just fluctuate within a range, implying that there is no significant change of the observed values.
 
 
 # Problem 3
@@ -97,13 +128,12 @@ From the plot above, we see that the average observation on the subjects in expe
 ```{r}
 set.seed(886) # ensure reproducible
 
-# buid function
+# buid a function which returns a df of the information of the fitted model
 slr_func <- 
   function(beta_1){
-    
     n = 30
     beta_0 = 2
-    sigma_squared = 50 #local defalut settings, we only change beta_1
+    sigma_squared = 50 #local defalut settings, we only change beta_1 later 
     
     sim_data =  
      tibble(
@@ -147,13 +177,13 @@ repeated_beta_1 %>%
   geom_smooth() +
   theme_bw() +
   labs( title = "Association Between Effect Size and Power",
-        x = "Beta_1",
+        x = "True Value of Beta1",
         y = "Power") +
   theme(plot.title = element_text(hjust = .5))
   
 ```
 
-From the plot above, we see that as β1 increases, the power correspondingly increases. however, the power's rate of increasing is gradually decreasing as β1 increases.
+From the plot above, we see that as β1 (effect size) increases, the power correspondingly increases. However, the increasing rate of power is gradually decreasing as β1 increases.
 
 
 ## Make a plot showing the average estimate of β̂ 1 on the y axis and the true value of β1 on the x axis
@@ -163,7 +193,7 @@ From the plot above, we see that as β1 increases, the power correspondingly inc
 all_avg <-
   repeated_beta_1 %>%
   group_by(beta_1) %>%
-  summarize(avg_beta_hat = mean(beta_1_hat))
+  summarize(avg_beta_hat = mean(beta_1_hat)) # calculation for the plot
   
 
 rejected_avg <- 
@@ -171,21 +201,26 @@ rejected_avg <-
   mutate(rejection = ifelse( p_value < 0.05, "yes", "no")) %>%
   filter( rejection == "yes") %>%
   group_by(beta_1) %>%
-  summarize(avg_beta_hat = mean(beta_1_hat))
+  summarize(avg_beta_hat = mean(beta_1_hat)) # calculation for the plot
+  
 
 ggplot() + 
-  geom_point(aes(x = beta_1, y = avg_beta_hat), data = all_avg) +
-  geom_smooth(aes(x = beta_1, y = avg_beta_hat), data = all_avg) +
-  geom_point(aes(x = beta_1, y = avg_beta_hat), data = rejected_avg) +
+  geom_point(aes(x = beta_1, y = avg_beta_hat), data = all_avg, color = "blue") +
+  geom_smooth(aes(x = beta_1, y = avg_beta_hat, color = "blue"),data = all_avg) +
+  geom_point(aes(x = beta_1, y = avg_beta_hat, color = "red"), data = rejected_avg) +
   geom_smooth(aes(x = beta_1, y = avg_beta_hat, color = "red"), data = rejected_avg) +
   theme_bw() +
   labs( title = "Association Between the Average Estimates and True Values",
         y = "Average Beta1 Hat",
-        x = "Beta1") +
-  theme(plot.title = element_text(hjust = .5)) +
-  ggsci::scale_color_lancet()
+        x = "True Value of Beta1") +
+  theme(plot.title = element_text(hjust = .5),
+        legend.position = "bottom",
+        legend.title = element_blank()) +
+  ggsci::scale_color_lancet(breaks = c("red", "blue"),
+                       labels = c("True Value of Beta1", "Average Beta1 Hat"),
+                       guide = "legend")
 ```
 
 The sample average of β̂1 across tests for which the null is rejected is always higher than the true value of β1. However, as the true value increases, the sample average of β̂1 gradually approxiates the true value.
 
-As we see in the first plot, when the true β1 is small, the power is also low. Therefore, given the null hypothesis β1 = 0 is FAlSE, the probability that a sampling result may reject H0 is relatively small. Hence, a greater "observed β̂1" is needed to reject the FALSE null hypothesis. However, as the true value of β increases, the power also increases, which means it becomes easier for an " observed β̂1 " to reject null hypothesis. That's why as the true value increases, the sample average of β̂1  gradually approxiates the true value.
+As we see in the first plot, when the true β1 is small, the power is also low. Therefore, given the null hypothesis β1 = 0 is FAlSE, the probability that a sampling result may reject H0 is relatively small. Hence, a greater "observed β̂1" is needed to reject the" FALSE" null hypothesis. However, as the true value of β increases, the power also increases, which means it becomes easier for a relatively small " observed β̂1 " to reject null hypothesis. That's why as the true value increases, the sample average of β̂1  gradually approxiates the true value.
