@@ -217,7 +217,7 @@ ggplot() +
         legend.position = "bottom",
         legend.title = element_blank()) +
   ggsci::scale_color_lancet(breaks = c("red", "blue"),
-                       labels = c("True Value of Beta1", "Average Beta1 Hat"),
+                       labels = c( "Average Beta1 Hat", "True Value of Beta1"),
                        guide = "legend")
 ```
 
